@@ -1,0 +1,100 @@
+name: GameHub CI/CD
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [license, order, user, publisher, catalog, payment, library, review]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: local-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s --health-timeout 4s --health-retries 20
+    env:
+      SERVICE: ${{ matrix.service }}
+      POSTGRES_URL: postgresql://postgres:local-only@127.0.0.1:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@localhost:5672/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest==8.3.5 httpx==0.28.1
+      - run: python -m pytest -q tests
+      - run: docker build --build-arg "SERVICE=$SERVICE" -t "gamehub-$SERVICE:test" .
+
+  e2e:
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: docker compose up --build --wait --wait-timeout 180
+      - run: python tools/e2e_check.py
+      - if: failure()
+        run: docker compose logs --no-color --tail 100
+      - if: always()
+        run: docker compose down -v
+
+  docker-hub:
+    needs: [test-and-build, e2e]
+    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && vars.ENABLE_DOCKER_HUB == 'true'
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: docker.io/${{ vars.DOCKERHUB_USERNAME }}/gamehub-review:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - run: |
+          docker build --build-arg SERVICE=review -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  yandex-cloud:
+    needs: [test-and-build, e2e]
+    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && vars.ENABLE_YC_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment: yandex-cloud
+    env:
+      IMAGE: cr.yandex/${{ vars.YC_REGISTRY_ID }}/gamehub-user:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: cr.yandex
+          username: json_key
+          password: ${{ secrets.YC_KEYS }}
+      - run: |
+          docker build --build-arg SERVICE=user -t "$IMAGE" .
+          docker push "$IMAGE"
+      - uses: yc-actions/yc-sls-container-deploy@v5
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_KEYS }}
+          container-name: ${{ vars.YC_CONTAINER_NAME }}
+          folder-id: ${{ vars.YC_FOLDER_ID }}
+          revision-image-url: ${{ env.IMAGE }}
+          revision-service-account-id: ${{ vars.YC_SA_ID }}
+          revision-cores: "1"
+          revision-memory: 512Mb
+          revision-env: |
+            FLUSH_EVENTS_ON_REQUEST=true
+            POSTGRES_URL=${{ secrets.ENV_POSTGRES_URL }}
+            AMQP_URL=${{ secrets.ENV_AMQP_URL }}
+

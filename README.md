@@ -1,3 +1,69 @@
-# GameHub
+# GameHub — практические работы 9 и 10
 
-Учебный проект по микросервисной архитектуре.
+Учебная платформа продажи компьютерных игр. Восемь профилей FastAPI собираются в отдельные образы из общего Dockerfile. У каждого сервиса своя PostgreSQL, события передаются через RabbitMQ. Проект восстановлен по контрактам и примерам из отчёта ПР5–8. Тесты и реализация хранилища написаны для восстановленной версии.
+
+## Локальный запуск
+
+Из каталога, в котором находится `compose.yaml`, выполните:
+
+```powershell
+docker compose up --build --wait --wait-timeout 180
+python tools/e2e_check.py
+```
+
+Скрипт проверяет покупку и отмену заказа, ответы об ошибках, наличие HTTP-метрик восьми сервисов и наличие общей трассы для оплаты, заказа, лицензий и библиотеки.
+
+| Компонент | Адрес |
+| --- | --- |
+| Swagger UI сервисов | http://localhost:8001/docs – http://localhost:8008/docs |
+| Prometheus | http://localhost:9090/targets |
+| Grafana | http://localhost:3000/d/gamehub-red |
+| Jaeger | http://localhost:16686 |
+| RabbitMQ | http://localhost:15672 |
+
+Порядок сервисов по портам 8001–8008: license, order, user, publisher, catalog, payment, library, review. Для первого входа в локальную Grafana используются стандартные `admin/admin`.
+
+Остановить стенд с сохранением данных:
+
+```powershell
+docker compose down
+```
+
+Модульные тесты, без Docker и сторонних Python-библиотек:
+
+```powershell
+python -m unittest discover -s tests -p test_domain.py -v
+```
+
+## ПР9 — настройка GitHub Actions
+
+Поместите содержимое проекта в корень GitHub-репозитория, включая скрытую папку `.github`. `.github/workflows/gamehub.yml` запускает матрицу на восьми сервисах при push и pull request. Каждая задача запускает модульные и интеграционные тесты с PostgreSQL и собирает свой образ. После матрицы запускается Compose со сквозной проверкой. Шаги доставки запускаются после успешного CI в основной ветке.
+
+### Docker Hub
+
+Для `review-service` укажите имя аккаунта в GitHub Actions variable `DOCKERHUB_USERNAME` и токен с правом записи в secret `DOCKERHUB_TOKEN`. Создайте или выберите репозиторий `gamehub-review` и включите доставку переменной `ENABLE_DOCKER_HUB=true`. Тег образа равен SHA коммита.
+
+### Yandex Cloud
+
+Для `user-service` нужны Container Registry, каталог Yandex Cloud и сервисный аккаунт деплоя с разрешениями на запись в реестр, создание ревизии и назначение аккаунта ревизии. Аккаунту ревизии нужен доступ на чтение образа. Контейнер использует предоставляемый Yandex Cloud порт `PORT` и должен иметь сетевой доступ к PostgreSQL и RabbitMQ.
+
+| Где | Имя | Значение |
+| --- | --- | --- |
+| Actions variable | `YC_REGISTRY_ID` | ID Container Registry |
+| Actions variable | `YC_FOLDER_ID` | ID каталога |
+| Actions variable | `YC_SA_ID` | ID сервисного аккаунта ревизии |
+| Actions variable | `YC_CONTAINER_NAME` | Имя с фамилией в начале, например `rasulov-gamehub-user` |
+| Actions secret | `YC_KEYS` | JSON авторизованного ключа сервисного аккаунта деплоя |
+| Actions secret | `ENV_POSTGRES_URL` | Строка подключения к тестовой PostgreSQL |
+| Actions secret | `ENV_AMQP_URL` | Строка подключения к тестовому RabbitMQ |
+| Actions variable | `ENABLE_YC_DEPLOY` | `true` после настройки облачных ресурсов |
+
+Развёртывание выполняется через [официальный GitHub Action Yandex Cloud](https://github.com/yc-actions/yc-sls-container-deploy). Для проверки ревизии выполните авторизованный запрос `GET /health`, затем `GET /api/users`. Учебный API не предусматривает пользовательской авторизации, поэтому оставьте облачный контейнер с доступом по IAM.
+
+## Проверка для отчёта
+
+1. GitHub Actions: результат восьми задач матрицы и задачи E2E.
+2. Docker Hub: тег SHA образа `gamehub-review`.
+3. Yandex Cloud: активная ревизия `user-service` с образом этого коммита в Container Registry.
+4. Prometheus: восемь целей `UP`. Grafana: панель `GameHub — HTTP RED` после запуска сценария.
+5. Jaeger: ссылка на трассу в выводе `tools/e2e_check.py`. У трассы оплаты видны HTTP-запрос, публикации и обработки событий в четырёх сервисах.

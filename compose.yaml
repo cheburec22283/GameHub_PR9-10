@@ -1,0 +1,301 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: gamehub
+      RABBITMQ_DEFAULT_PASS: local-only
+    ports:
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 25
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  grafana:
+    image: grafana/grafana:12.0.1
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+  license-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - license-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  license-service:
+    build:
+      context: .
+      args:
+        SERVICE: license
+    ports:
+      - "127.0.0.1:8001:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@license-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      license-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  order-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - order-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  order-service:
+    build:
+      context: .
+      args:
+        SERVICE: order
+    ports:
+      - "127.0.0.1:8002:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@order-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  user-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - user-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  user-service:
+    build:
+      context: .
+      args:
+        SERVICE: user
+    ports:
+      - "127.0.0.1:8003:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@user-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      user-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  publisher-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - publisher-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  publisher-service:
+    build:
+      context: .
+      args:
+        SERVICE: publisher
+    ports:
+      - "127.0.0.1:8004:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@publisher-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      publisher-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  catalog-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - catalog-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  catalog-service:
+    build:
+      context: .
+      args:
+        SERVICE: catalog
+    ports:
+      - "127.0.0.1:8005:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@catalog-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  payment-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - payment-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  payment-service:
+    build:
+      context: .
+      args:
+        SERVICE: payment
+    ports:
+      - "127.0.0.1:8006:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@payment-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  library-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - library-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  library-service:
+    build:
+      context: .
+      args:
+        SERVICE: library
+    ports:
+      - "127.0.0.1:8007:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@library-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      library-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+  review-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-only
+    volumes:
+      - review-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  review-service:
+    build:
+      context: .
+      args:
+        SERVICE: review
+    ports:
+      - "127.0.0.1:8008:8080"
+    environment:
+      POSTGRES_URL: postgresql://postgres:local-only@review-db:5432/postgres
+      AMQP_URL: amqp://gamehub:local-only@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      review-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+volumes:
+  rabbitmq-data:
+  license-data:
+  order-data:
+  user-data:
+  publisher-data:
+  catalog-data:
+  payment-data:
+  library-data:
+  review-data:

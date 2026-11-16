@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: license-service
+    static_configs:
+      - targets: ["license-service:8080"]
+  - job_name: order-service
+    static_configs:
+      - targets: ["order-service:8080"]
+  - job_name: user-service
+    static_configs:
+      - targets: ["user-service:8080"]
+  - job_name: publisher-service
+    static_configs:
+      - targets: ["publisher-service:8080"]
+  - job_name: catalog-service
+    static_configs:
+      - targets: ["catalog-service:8080"]
+  - job_name: payment-service
+    static_configs:
+      - targets: ["payment-service:8080"]
+  - job_name: library-service
+    static_configs:
+      - targets: ["library-service:8080"]
+  - job_name: review-service
+    static_configs:
+      - targets: ["review-service:8080"]
+
