@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "folder_id": "b1ga2rup622eklsq2lpp",
+  "registry_id": "crp6lro5sa6djdag550m",
+  "deploy_service_account_id": "ajes3tf3ofjfkam02rjj",
+  "runtime_service_account_id": "ajehha8hhct1orara60p",
+  "container_name": "rasulov-gamehub-user",
+  "network_id": "",
+  "lockbox_secret_id": "",
+  "lockbox_version_id": "",
+  "otlp_traces_endpoint": ""
+}

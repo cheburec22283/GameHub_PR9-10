@@ -7,6 +7,16 @@ permissions:
   contents: read
 
 jobs:
+  cloud-config:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.config.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate public cloud configuration
+        id: config
+        run: python tools/cloud_config.py
+
   test-and-build:
     runs-on: ubuntu-latest
     strategy:
@@ -68,33 +78,102 @@ jobs:
           docker push "$IMAGE"
 
   yandex-cloud:
-    needs: [test-and-build, e2e]
-    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && vars.ENABLE_YC_DEPLOY == 'true'
+    needs: [test-and-build, e2e, cloud-config]
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      github.event_name != 'pull_request' &&
+      needs.cloud-config.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment: yandex-cloud
-    env:
-      IMAGE: cr.yandex/${{ vars.YC_REGISTRY_ID }}/gamehub-user:${{ github.sha }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Load validated cloud configuration
+        run: python tools/cloud_config.py
+      - name: Exchange GitHub OIDC token for Yandex IAM token
+        id: iam
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const idToken = await core.getIDToken(`https://github.com/${context.repo.owner}`);
+            core.setSecret(idToken);
+            const body = new URLSearchParams({
+              grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+              requested_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+              audience: process.env.YC_DEPLOY_SA_ID,
+              subject_token: idToken,
+              subject_token_type: 'urn:ietf:params:oauth:token-type:id_token'
+            });
+            const response = await fetch('https://auth.yandex.cloud/oauth/token', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+              body,
+              redirect: 'error'
+            });
+            if (!response.ok) {
+              throw new Error(`Yandex IAM exchange returned HTTP ${response.status}`);
+            }
+            const result = await response.json();
+            if (typeof result.access_token !== 'string' || !result.access_token) {
+              throw new Error('Yandex IAM exchange did not return an access token');
+            }
+            core.setSecret(result.access_token);
+            core.setOutput('token', result.access_token);
+            core.info('Authenticated to Yandex Cloud using GitHub workload identity');
       - uses: docker/login-action@v3
         with:
           registry: cr.yandex
-          username: json_key
-          password: ${{ secrets.YC_KEYS }}
-      - run: |
+          username: iam
+          password: ${{ steps.iam.outputs.token }}
+      - name: Build and push user-service
+        run: |
+          IMAGE="cr.yandex/${YC_REGISTRY_ID}/gamehub-user:${GITHUB_SHA}"
           docker build --build-arg SERVICE=user -t "$IMAGE" .
           docker push "$IMAGE"
-      - uses: yc-actions/yc-sls-container-deploy@v5
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy private user-service
+        id: deploy
+        uses: yc-actions/yc-sls-container-deploy@v5
         with:
-          yc-sa-json-credentials: ${{ secrets.YC_KEYS }}
-          container-name: ${{ vars.YC_CONTAINER_NAME }}
-          folder-id: ${{ vars.YC_FOLDER_ID }}
+          yc-iam-token: ${{ steps.iam.outputs.token }}
+          container-name: ${{ env.YC_CONTAINER_NAME }}
+          folder-id: ${{ env.YC_FOLDER_ID }}
           revision-image-url: ${{ env.IMAGE }}
-          revision-service-account-id: ${{ vars.YC_SA_ID }}
+          revision-service-account-id: ${{ env.YC_SA_ID }}
+          public: false
+          revision-network-id: ${{ env.YC_NETWORK_ID }}
           revision-cores: "1"
           revision-memory: 512Mb
+          revision-execution-timeout: "60"
           revision-env: |
             FLUSH_EVENTS_ON_REQUEST=true
-            POSTGRES_URL=${{ secrets.ENV_POSTGRES_URL }}
-            AMQP_URL=${{ secrets.ENV_AMQP_URL }}
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${{ env.YC_OTLP_TRACES_ENDPOINT }}
+          revision-secrets: |
+            POSTGRES_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/${{ env.YC_LOCKBOX_VERSION_ID }}/POSTGRES_URL
+            AMQP_URL=${{ env.YC_LOCKBOX_SECRET_ID }}/${{ env.YC_LOCKBOX_VERSION_ID }}/AMQP_URL
+      - name: Verify private cloud service
+        env:
+          YC_CONTAINER_ID: ${{ steps.deploy.outputs.id }}
+          YC_IAM_TOKEN: ${{ steps.iam.outputs.token }}
+        run: python tools/cloud_smoke.py
+      - name: Record deployment evidence
+        env:
+          CONTAINER_ID: ${{ steps.deploy.outputs.id }}
+          REVISION_ID: ${{ steps.deploy.outputs.rev }}
+        run: |
+          python - <<'PY'
+          import os
 
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Yandex Cloud deployment\n\n")
+              for label, name in (
+                  ("Container", "CONTAINER_ID"),
+                  ("Revision", "REVISION_ID"),
+                  ("Image", "IMAGE"),
+              ):
+                  summary.write(f"- {label}: `{os.environ[name]}`\n")
+              summary.write("- Private IAM invocation and API smoke test passed.\n")
+              summary.write("- RabbitMQ delivery requires a separate outbox check.\n")
+          PY
