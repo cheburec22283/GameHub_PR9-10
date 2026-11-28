@@ -99,6 +99,8 @@ jobs:
           script: |
             const idToken = await core.getIDToken(`https://github.com/${context.repo.owner}`);
             core.setSecret(idToken);
+            const claims = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString('utf8'));
+            core.info(`OIDC issuer=${claims.iss}; subject=${claims.sub}; audience=${JSON.stringify(claims.aud)}`);
             const body = new URLSearchParams({
               grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
               requested_token_type: 'urn:ietf:params:oauth:token-type:access_token',
@@ -113,7 +115,9 @@ jobs:
               redirect: 'error'
             });
             if (!response.ok) {
-              throw new Error(`Yandex IAM exchange returned HTTP ${response.status}`);
+              const error = await response.json().catch(() => ({}));
+              const detail = error.error_description || error.message || error.error || 'no error detail';
+              throw new Error(`Yandex IAM exchange returned HTTP ${response.status}: ${String(detail).slice(0, 240)}`);
             }
             const result = await response.json();
             if (typeof result.access_token !== 'string' || !result.access_token) {
