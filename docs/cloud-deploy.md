@@ -1,8 +1,10 @@
 # Развёртывание user-service через GitHub OIDC и Yandex Lockbox
 
-Этот документ описывает подготовленную конфигурацию. Сам по себе файл workflow
-не подтверждает, что облачный контейнер уже развёрнут. В текущем файле
-`.github/gamehub-cloud.json` стоит `enabled: false`.
+Этот документ описывает конфигурацию развёртывания GameHub в Yandex Cloud.
+В `.github/gamehub-cloud.json` установлено `enabled: true`, а ресурсы VPC,
+Lockbox и ВМ уже подготовлены. Облачная задача выполняется только в основной
+ветке после успешных тестов и E2E; подтверждением развёртывания служит успешный
+результат `yandex-cloud` и запись контейнера, ревизии и образа в GitHub summary.
 
 ## Настройки, которые можно хранить в репозитории
 
@@ -81,6 +83,19 @@ Container Registry, deploy action и smoke-проверки.
 `iam.workloadIdentityFederations.user` на каталог федерации. Самому CI эти роли
 для обычного деплоя не нужны.
 
+## Ресурсы Yandex Cloud
+
+Для учебного стенда создана ВМ `gamehub-dependencies` в зоне `ru-central1-d`:
+Ubuntu 24.04 LTS, 2 vCPU с гарантированной долей 20%, 4 ГиБ RAM и HDD 20 ГиБ.
+На ней cloud-init устанавливает Docker и запускает PostgreSQL 16 и RabbitMQ
+3.13 через Docker Compose. ВМ использует сервисный аккаунт `gamehub-runtime`.
+
+ВМ подключена к VPC `enpcn6m28kg2g6vlahhd` и группе безопасности
+`enpiot8j6lie5segu3qt`. Входящие правила разрешают только TCP 5432 и 5672
+из диапазона `198.19.0.0/16`, используемого Serverless Containers. SSH и
+публичный доступ к базе данных и брокеру закрыты. Исходящий трафик ограничен
+DNS и TCP 80–443 для установки пакетов и загрузки образов.
+
 ## PostgreSQL, RabbitMQ и Lockbox
 
 Зависимости должны быть доступны из выбранной VPC. Для учебной базы нужен
@@ -89,8 +104,10 @@ Container Registry, deploy action и smoke-проверки.
 и `AMQP_URL`. Их имена отображаются в `revision-secrets`; сами значения не
 попадают в репозиторий или GitHub Secrets.
 
-Перед включением деплоя нужно записать network_id, lockbox_secret_id и точный
-lockbox_version_id. Наличие JSON-конфигурации не создаёт эти ресурсы.
+Для этого развёртывания идентификаторы VPC, Lockbox и версии секрета уже внесены
+в `.github/gamehub-cloud.json`. Конфигурация содержит только ID ресурсов;
+пароли и URL остаются в Lockbox. Runtime-аккаунту предоставлена роль
+`lockbox.payloadViewer` только на этот секрет.
 
 ## Проверка результата
 
