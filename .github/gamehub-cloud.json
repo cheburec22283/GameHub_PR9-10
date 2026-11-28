@@ -1,12 +1,12 @@
 {
-  "enabled": false,
+  "enabled": true,
   "folder_id": "b1ga2rup622eklsq2lpp",
   "registry_id": "crp6lro5sa6djdag550m",
   "deploy_service_account_id": "ajes3tf3ofjfkam02rjj",
   "runtime_service_account_id": "ajehha8hhct1orara60p",
   "container_name": "rasulov-gamehub-user",
-  "network_id": "",
-  "lockbox_secret_id": "",
-  "lockbox_version_id": "",
+  "network_id": "enpcn6m28kg2g6vlahhd",
+  "lockbox_secret_id": "e6qvihc6olsic1as7eal",
+  "lockbox_version_id": "e6q3eo06ji5mihp1snaq",
   "otlp_traces_endpoint": ""
 }
