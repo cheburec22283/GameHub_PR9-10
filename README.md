@@ -58,22 +58,13 @@ python -m unittest discover -s tests -p test_domain.py -v
 
 ### Настройки для развёртывания в Yandex Cloud
 
-Этот шаг предусмотрен в workflow. В выполненной работе вместо облачного деплоя использовали временный стенд Docker Compose, на котором сквозной сценарий проверил регистрацию пользователей через `user-service`.
+Облачные ресурсы подготовлены: приватная ВМ с PostgreSQL и RabbitMQ, отдельная группа безопасности и строки подключения в Yandex Lockbox. Workflow использует GitHub Workload Identity Federation и получает краткоживущий IAM-токен без `YC_KEYS`. В `.github/gamehub-cloud.json` хранятся только несекретные идентификаторы.
 
-Для `user-service` нужны Container Registry, каталог Yandex Cloud и сервисный аккаунт деплоя с разрешениями на запись в реестр, создание ревизии и назначение аккаунта ревизии. Аккаунту ревизии нужен доступ на чтение образа. Контейнер использует предоставляемый Yandex Cloud порт `PORT` и должен иметь сетевой доступ к PostgreSQL и RabbitMQ.
+Конфигурация `enabled: true`; облачная задача запускается только после прохождения проверок и события в основной ветке. До успешного результата этой задачи нельзя считать контейнер развёрнутым. Точный статус, ID образа и ревизии записываются в GitHub Actions summary.
 
-| Где | Имя | Значение |
-| --- | --- | --- |
-| Actions variable | `YC_REGISTRY_ID` | ID Container Registry |
-| Actions variable | `YC_FOLDER_ID` | ID каталога |
-| Actions variable | `YC_SA_ID` | ID сервисного аккаунта ревизии |
-| Actions variable | `YC_CONTAINER_NAME` | Имя с фамилией в начале, например `rasulov-gamehub-user` |
-| Actions secret | `YC_KEYS` | JSON авторизованного ключа сервисного аккаунта деплоя |
-| Actions secret | `ENV_POSTGRES_URL` | Строка подключения к тестовой PostgreSQL |
-| Actions secret | `ENV_AMQP_URL` | Строка подключения к тестовому RabbitMQ |
-| Actions variable | `ENABLE_YC_DEPLOY` | `true` после настройки облачных ресурсов |
+`user-service` развёртывается как приватный Serverless Container в VPC. После deploy конвейер проверяет отказ без токена, авторизованный `/health`, регистрацию и чтение пользователя, HTTP-метрики. ID контейнера, ревизии и образа записываются в GitHub summary. Доставка события RabbitMQ требует отдельной проверки.
 
-Развёртывание выполняется через [официальный GitHub Action Yandex Cloud](https://github.com/yc-actions/yc-sls-container-deploy). Для проверки ревизии выполните авторизованный запрос `GET /health`, затем `GET /api/users`. Учебный API не предусматривает пользовательской авторизации, поэтому оставьте облачный контейнер с доступом по IAM.
+Полный порядок настройки федерации, Lockbox, ролей и smoke-проверки описан в [руководстве облачного развёртывания](docs/cloud-deploy.md). Облачный job не требует входа в GitHub через браузер и записи новых GitHub Secrets. Существующая конфигурация Docker Hub сохраняется.
 
 ## Проверка для отчёта
 
